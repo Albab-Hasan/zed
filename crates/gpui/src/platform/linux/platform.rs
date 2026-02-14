@@ -843,9 +843,9 @@ fn guess_ascii(keycode: Keycode, shift: bool) -> Option<char> {
         (57, _) => 'n',
         (58, _) => 'm',
         (59, false) => ',',
-        (59, true) => '>',
+        (59, true) => '<',
         (60, false) => '.',
-        (60, true) => '<',
+        (60, true) => '>',
         (61, false) => '/',
         (61, true) => '?',
 
