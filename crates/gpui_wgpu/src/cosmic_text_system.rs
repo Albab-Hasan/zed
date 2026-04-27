@@ -765,9 +765,6 @@ fn slot_font_id(
     }
 }
 
-/// inheriting codepoints stick to the current span. a covered current span
-/// wins over re-checking primary so a stretch of text served by a fallback
-/// does not flip back to primary on each codepoint.
 fn pick_covering_slot(
     ch: char,
     current: Option<usize>,
@@ -778,12 +775,12 @@ fn pick_covering_slot(
     if is_inheriting_codepoint(ch) {
         return current;
     }
+    if covers(primary, ch) {
+        return None;
+    }
     let current_id = slot_font_id(current, primary, fallback_chain);
     if covers(current_id, ch) {
         return current;
-    }
-    if covers(primary, ch) {
-        return None;
     }
     for (ix, (fb_id, _)) in fallback_chain.iter().enumerate() {
         if covers(*fb_id, ch) {
@@ -921,15 +918,13 @@ mod tests {
     }
 
     #[test]
-    fn current_span_wins_when_it_covers() {
+    fn primary_wins_over_current_fallback_when_primary_covers() {
         let primary = fid(0);
         let fb = chain(&[1, 2]);
-        // primary and fallback 0 both cover the char. the current span fb 0 must
-        // hold so we dont swap back to primary mid word.
         let covers = |id: FontId, _: char| id == fid(0) || id == fid(1);
         assert_eq!(
             pick_covering_slot('a', Some(0), primary, &fb, &covers),
-            Some(0)
+            None
         );
     }
 
