@@ -16,9 +16,9 @@ use smallvec::SmallVec;
 use std::{borrow::Cow, sync::Arc};
 use swash::{
     scale::{Render, ScaleContext, Source, StrikeWith},
-    text::{Category, Codepoint as _},
     zeno::{Format, Vector},
 };
+use unicode_segmentation::UnicodeSegmentation;
 
 pub struct CosmicTextSystem(RwLock<CosmicTextSystemState>);
 
@@ -725,8 +725,9 @@ fn compute_run_spans(
     let mut span_start = run_offset;
     let mut span_slot: Option<usize> = None;
     let mut span_font_id = primary;
-    for (ch_idx, ch) in run_text.char_indices() {
-        let abs = run_offset + ch_idx;
+    for (grapheme_idx, grapheme) in run_text.grapheme_indices(true) {
+        let abs = run_offset + grapheme_idx;
+        let ch = grapheme.chars().next().unwrap_or('\0');
         let next_slot = pick_covering_slot(ch, span_slot, primary, fallback_chain, covers);
         if next_slot == span_slot {
             continue;
@@ -772,8 +773,8 @@ fn pick_covering_slot(
     fallback_chain: &[(FontId, SharedString)],
     covers: &impl Fn(FontId, char) -> bool,
 ) -> Option<usize> {
-    if is_inheriting_codepoint(ch) {
-        return current;
+    if (ch as u32) <= 0x7F {
+        return None;
     }
     if covers(primary, ch) {
         return None;
@@ -794,21 +795,6 @@ fn charmap_covers(loaded_fonts: &[LoadedFont], id: FontId, ch: char) -> bool {
     loaded_fonts
         .get(id.0)
         .is_some_and(|loaded| loaded.font.as_swash().charmap().map(ch) != 0)
-}
-
-/// codepoints that attach to the previous base character. swapping fonts
-/// across them would tear shaping apart. covers all unicode mark categories
-/// so script combining marks like devanagari and arabic vowels stay with the
-/// preceding base. zwj and zwnj are category `Cf` so they need an explicit
-/// check. variation selectors are `Mn` and fall out of the category check.
-fn is_inheriting_codepoint(ch: char) -> bool {
-    if matches!(ch, '\u{200C}' | '\u{200D}') {
-        return true;
-    }
-    matches!(
-        ch.properties().category(),
-        Category::NonspacingMark | Category::SpacingMark | Category::EnclosingMark
-    )
 }
 
 fn cosmic_font_features(features: &FontFeatures) -> Result<CosmicFontFeatures> {
@@ -894,30 +880,6 @@ mod tests {
     }
 
     #[test]
-    fn inheriting_codepoints_stick_to_current_span() {
-        let primary = fid(0);
-        let fb = chain(&[1]);
-        // no font covers anything. inheriting char must still pin to current.
-        let covers = |_: FontId, _: char| false;
-
-        // zwj.
-        assert_eq!(
-            pick_covering_slot('\u{200D}', Some(0), primary, &fb, &covers),
-            Some(0)
-        );
-        // combining acute accent.
-        assert_eq!(
-            pick_covering_slot('\u{0301}', None, primary, &fb, &covers),
-            None
-        );
-        // variation selector 16.
-        assert_eq!(
-            pick_covering_slot('\u{FE0F}', Some(0), primary, &fb, &covers),
-            Some(0)
-        );
-    }
-
-    #[test]
     fn primary_wins_over_current_fallback_when_primary_covers() {
         let primary = fid(0);
         let fb = chain(&[1, 2]);
@@ -973,24 +935,6 @@ mod tests {
             pick_covering_slot('a', None, primary, &fb, &covers),
             None
         );
-    }
-
-    #[test]
-    fn is_inheriting_codepoint_boundaries() {
-        assert!(is_inheriting_codepoint('\u{200C}')); // zwnj.
-        assert!(is_inheriting_codepoint('\u{200D}')); // zwj.
-        assert!(is_inheriting_codepoint('\u{0300}')); // start combining.
-        assert!(is_inheriting_codepoint('\u{036F}')); // end combining.
-        assert!(is_inheriting_codepoint('\u{FE0F}')); // vs 16.
-        assert!(is_inheriting_codepoint('\u{E0100}')); // vs supplement start.
-
-        assert!(!is_inheriting_codepoint('\u{200B}')); // zwsp is not inheriting.
-        assert!(!is_inheriting_codepoint('\u{200E}'));
-        assert!(!is_inheriting_codepoint('\u{02FF}'));
-        assert!(!is_inheriting_codepoint('\u{0370}'));
-        assert!(!is_inheriting_codepoint('a'));
-        assert!(!is_inheriting_codepoint('字'));
-        assert!(!is_inheriting_codepoint('\u{1F600}'));
     }
 
     #[test]
